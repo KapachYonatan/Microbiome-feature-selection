@@ -1,0 +1,31 @@
+pipeline:
+  base_dir: /home1/kapachy/Microbium/projects/cMD_downloads
+  study: WirbelJ_2018
+  sparsity_threshold: 0.85
+  k_neighbors: 40
+  target_fdr: 0.05
+  num_shuffles: 20
+  correlation_threshold: 0.95
+  calibration_features: 2000
+  calibration_trials: 50
+  cluster_batch_size: 64000
+  seed: 42
+
+preprocessing:
+  rare_threshold: 0.05
+  condition_col: disease
+  healthy_label: healthy
+  condition_label: IBD
+
+classifier_comparison:
+  random_state: 42
+  test_size: 0.2
+  k_grid_points: 20
+  random_trials: 20
+  k_end: 5000
+
+visualization:
+  mode: all
+  target_fdr: 0.05
+  n_shuffles: 20
+  seed: 42
