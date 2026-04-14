@@ -37,6 +37,12 @@ def save_run_metadata(
     model_type: str,
     distribution_learner: str,
     tuning_backend: str,
+    deterministic_mode: bool,
+    faiss_mode: str,
+    faiss_threads: int,
+    use_optuna_tuning: bool,
+    classifier_params: dict | None,
+    regressor_params: dict | None,
 ) -> dict:
     """Persist run metadata JSON and return the in-memory metadata object."""
 
@@ -59,6 +65,13 @@ def save_run_metadata(
             "distribution_learner": distribution_learner,
             "tuning_backend": tuning_backend,
             "random_seed": config.random_seed,
+            "deterministic_mode": bool(deterministic_mode),
+            "faiss_mode": faiss_mode,
+            "faiss_threads": int(faiss_threads),
+            "filter_n_jobs": int(config.effective_filter_n_jobs),
+            "use_optuna_tuning": bool(use_optuna_tuning),
+            "classifier_params": classifier_params,
+            "regressor_params": regressor_params,
         },
     }
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from scipy import sparse
@@ -35,10 +35,23 @@ class RunConfig:
     calibration_trials: int = 50
     cluster_batch_size: int = 64000
     random_seed: int = 42
+    deterministic_mode: bool = False
+    faiss_mode: Literal["hnsw", "flat"] = "hnsw"
+    faiss_threads: int = 1
+    filter_n_jobs: int | None = None
+    use_optuna_tuning: bool = True
+    classifier_params: dict[str, Any] | None = None
+    regressor_params: dict[str, Any] | None = None
 
     @property
     def study_dir(self) -> Path:
         return self.base_dir / self.study_name
+
+    @property
+    def effective_filter_n_jobs(self) -> int:
+        if self.filter_n_jobs is not None:
+            return int(self.filter_n_jobs)
+        return 1 if self.deterministic_mode else -1
 
 
 @dataclass(frozen=True)
@@ -145,3 +158,25 @@ class PipelineArtifacts:
     cov_plot_path: Path
     rsp_results_path: Path
     rsp_plot_path: Path
+
+
+def validate_run_config(config: RunConfig) -> None:
+    """Validate deterministic/tuning configuration combinations."""
+
+    if config.faiss_mode not in {"hnsw", "flat"}:
+        raise ValueError(f"Invalid faiss_mode: {config.faiss_mode}")
+
+    if int(config.faiss_threads) < 1:
+        raise ValueError(f"faiss_threads must be >= 1, got {config.faiss_threads}")
+
+    if int(config.k_neighbors) < 1:
+        raise ValueError(f"k_neighbors must be >= 1, got {config.k_neighbors}")
+
+    if config.classifier_params is not None and not isinstance(config.classifier_params, dict):
+        raise TypeError("classifier_params must be a dict or None")
+
+    if config.regressor_params is not None and not isinstance(config.regressor_params, dict):
+        raise TypeError("regressor_params must be a dict or None")
+
+    if config.filter_n_jobs is not None and int(config.filter_n_jobs) == 0:
+        raise ValueError("filter_n_jobs cannot be 0")

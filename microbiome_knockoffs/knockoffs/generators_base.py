@@ -33,9 +33,12 @@ class BaseKnockoffGenerator:
         tuner: HyperparameterTuner | None = None,
         neighbor_index: NeighborIndex | None = None,
         random_seed: int = 42,
+        deterministic_mode: bool = False,
     ) -> None:
         self.k = k_neighbors
         self.logs: list[dict[str, Any]] = []
+        self.random_seed = int(random_seed)
+        self.deterministic_mode = bool(deterministic_mode)
         self.rng = np.random.default_rng(random_seed)
 
         X_processed = self._preprocess_data(X)
@@ -132,7 +135,8 @@ class BaseKnockoffGenerator:
 
         print(f"\n--- Starting calibration ({n_calibration} sampled features) ---")
         batch = self._prepare_calibration_data(n_calibration)
-        result = self.tuner.tune(batch=batch, n_trials=n_trials, seed=int(self.rng.integers(1, 10_000)))
+        tune_seed = self.random_seed if self.deterministic_mode else int(self.rng.integers(1, 10_000))
+        result = self.tuner.tune(batch=batch, n_trials=n_trials, seed=tune_seed)
         self.clf_params = result.classifier_params
         self.reg_params = result.regressor_params
 

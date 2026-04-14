@@ -11,6 +11,7 @@ def exact_covariance_comparison(
     X_knockoff: np.ndarray,
     n_anchors: int = 100,
     k_pairs: int = 100,
+    rng: np.random.Generator | None = None,
 ) -> tuple[list[float], list[float]]:
     """Sample feature pairs and compute exact covariance in original and knockoff matrices.
 
@@ -25,17 +26,19 @@ def exact_covariance_comparison(
 
     n_samples, n_features = X_orig.shape
     X_std = StandardScaler().fit_transform(X_orig)
+    rng = rng or np.random.default_rng(0)
 
     cov_original: list[float] = []
     cov_knockoff: list[float] = []
 
-    anchor_indices = np.random.choice(n_features, n_anchors, replace=False)
+    n_anchors = min(max(1, n_anchors), n_features)
+    anchor_indices = rng.choice(n_features, n_anchors, replace=False)
 
     for idx_anchor in anchor_indices:
         vec_anchor = X_std[:, idx_anchor]
 
         batch_size = min(5000, n_features)
-        search_batch_idx = np.random.choice(n_features, batch_size, replace=False)
+        search_batch_idx = rng.choice(n_features, batch_size, replace=False)
         batch_vectors = X_std[:, search_batch_idx]
 
         corrs = np.dot(batch_vectors.T, vec_anchor) / n_samples
@@ -52,6 +55,13 @@ def exact_covariance_comparison(
             cov_original.append(float(c_orig))
             cov_knockoff.append(float(c_knock))
 
+    if not cov_original:
+        if n_features < 2:
+            return [0.0], [0.0]
+        c_orig = float(np.cov(X_orig[:, 0], X_orig[:, 1])[0, 1])
+        c_knock = float(np.cov(X_knockoff[:, 0], X_knockoff[:, 1])[0, 1])
+        return [c_orig], [c_knock]
+
     return cov_original, cov_knockoff
 
 
@@ -60,6 +70,7 @@ def plot_cov_preservation(
     X_knockoff: np.ndarray,
     title_suffix: str = "",
     save_path: str | None = None,
+    rng: np.random.Generator | None = None,
 ) -> float:
     """Generate covariance preservation scatter plot and return preservation correlation.
 
@@ -72,6 +83,7 @@ def plot_cov_preservation(
         X_knockoff,
         n_anchors=100,
         k_pairs=100,
+        rng=rng,
     )
 
     plt.figure(figsize=(10, 8))
@@ -92,6 +104,9 @@ def plot_cov_preservation(
 
     plt.close()
 
-    r_preservation = float(np.corrcoef(orig_covs, knock_covs)[0, 1])
+    if len(orig_covs) < 2 or np.std(orig_covs) == 0.0 or np.std(knock_covs) == 0.0:
+        r_preservation = 0.0
+    else:
+        r_preservation = float(np.corrcoef(orig_covs, knock_covs)[0, 1])
     print(f"Overall Preservation Score: {r_preservation:.4f}")
     return r_preservation

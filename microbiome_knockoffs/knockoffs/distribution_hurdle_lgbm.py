@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import warnings
 
 import numpy as np
@@ -14,14 +15,28 @@ warnings.filterwarnings(
     "ignore",
     message=r"X does not have valid feature names, but LGBMClassifier was fitted with feature names",
     category=UserWarning,
-    module=r"sklearn\.utils\.validation",
 )
 warnings.filterwarnings(
     "ignore",
     message=r"X does not have valid feature names, but LGBMRegressor was fitted with feature names",
     category=UserWarning,
-    module=r"sklearn\.utils\.validation",
 )
+
+
+@contextmanager
+def _suppress_feature_name_warnings():
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"X does not have valid feature names, but LGBMClassifier was fitted with feature names",
+            category=UserWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=r"X does not have valid feature names, but LGBMRegressor was fitted with feature names",
+            category=UserWarning,
+        )
+        yield
 
 
 class HurdleLGBMDistribution(DistributionLearner):
@@ -49,10 +64,17 @@ class HurdleLGBMDistribution(DistributionLearner):
         if n_nonzero == n:
             return np.ones(n, dtype=bool), status
 
-        clf = lgb.LGBMClassifier(**classifier_params)
+        local_classifier_params = classifier_params.copy()
+        local_classifier_params.setdefault("random_state", 0)
+        local_classifier_params.setdefault("feature_fraction_seed", 0)
+        local_classifier_params.setdefault("bagging_seed", 0)
+        local_classifier_params.setdefault("data_random_seed", 0)
+
+        clf = lgb.LGBMClassifier(**local_classifier_params)
         try:
-            clf.fit(S_matrix_raw, y_binary)
-            probs = clf.predict_proba(S_matrix_raw)[:, 1]
+            with _suppress_feature_name_warnings():
+                clf.fit(S_matrix_raw, y_binary)
+                probs = clf.predict_proba(S_matrix_raw)[:, 1]
             is_nonzero_sim = rng.random(n) < probs
         except Exception as exc:
             status = f"Fallback: Classifier Exception ({exc})"
@@ -94,6 +116,10 @@ class HurdleLGBMDistribution(DistributionLearner):
             return values, status
 
         local_params = regressor_params.copy()
+        local_params.setdefault("random_state", 0)
+        local_params.setdefault("feature_fraction_seed", 0)
+        local_params.setdefault("bagging_seed", 0)
+        local_params.setdefault("data_random_seed", 0)
         if n_nonzero < 2 * min_samples:
             new_min_child = max(1, int(n_nonzero / 2))
             local_params["min_child_samples"] = new_min_child
@@ -111,12 +137,13 @@ class HurdleLGBMDistribution(DistributionLearner):
             if len(y_train) == 0:
                 return values, "Fallback: No positive non-zero values available"
 
-            reg.fit(X_train[: len(y_train)], np.log(y_train))
+            with _suppress_feature_name_warnings():
+                reg.fit(X_train[: len(y_train)], np.log(y_train))
 
-            X_test = S_matrix_raw[is_nonzero_sim]
-            mu_hat_log = reg.predict(X_test)
+                X_test = S_matrix_raw[is_nonzero_sim]
+                mu_hat_log = reg.predict(X_test)
 
-            preds_train_log = reg.predict(X_train[: len(y_train)])
+                preds_train_log = reg.predict(X_train[: len(y_train)])
             residuals_log = np.log(y_train) - preds_train_log
             std_dev_log = float(np.std(residuals_log))
 

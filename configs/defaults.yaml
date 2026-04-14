@@ -11,6 +11,17 @@ pipeline:
   cluster_batch_size: 64000
   seed: 42
 
+determinism:
+  deterministic_mode: false
+  faiss_mode: hnsw
+  faiss_threads: 1
+  filter_n_jobs: null
+
+tuning:
+  use_optuna_tuning: true
+  classifier_params: null
+  regressor_params: null
+
 preprocessing:
   rare_threshold: 0.05
   condition_col: disease

@@ -17,13 +17,11 @@ warnings.filterwarnings(
     "ignore",
     message=r"X does not have valid feature names, but LGBMClassifier was fitted with feature names",
     category=UserWarning,
-    module=r"sklearn\.utils\.validation",
 )
 warnings.filterwarnings(
     "ignore",
     message=r"X does not have valid feature names, but LGBMRegressor was fitted with feature names",
     category=UserWarning,
-    module=r"sklearn\.utils\.validation",
 )
 
 
@@ -42,6 +40,10 @@ class OptunaLGBMTuner(HyperparameterTuner):
             "verbose": -1,
             "objective": "binary",
             "n_jobs": 1,
+            "random_state": 0,
+            "feature_fraction_seed": 0,
+            "bagging_seed": 0,
+            "data_random_seed": 0,
         }
         self.default_regressor_params = default_regressor_params or {
             "n_estimators": 30,
@@ -50,6 +52,10 @@ class OptunaLGBMTuner(HyperparameterTuner):
             "verbose": -1,
             "objective": "regression",
             "n_jobs": 1,
+            "random_state": 0,
+            "feature_fraction_seed": 0,
+            "bagging_seed": 0,
+            "data_random_seed": 0,
         }
 
     @property
@@ -87,6 +93,11 @@ class OptunaLGBMTuner(HyperparameterTuner):
         n_trials: int,
         seed: int,
     ) -> tuple[dict, float]:
+        stable_order = np.argsort(groups_clf_all, kind="mergesort")
+        X_clf_all = X_clf_all[stable_order]
+        y_clf_all = y_clf_all[stable_order]
+        groups_clf_all = groups_clf_all[stable_order]
+
         n_unique_groups = len(np.unique(groups_clf_all))
         n_splits = min(5, n_unique_groups)
 
@@ -122,6 +133,10 @@ class OptunaLGBMTuner(HyperparameterTuner):
                 "verbose": -1,
                 "objective": "binary",
                 "scale_pos_weight": scale_pos_weight,
+                "random_state": seed,
+                "feature_fraction_seed": seed,
+                "bagging_seed": seed,
+                "data_random_seed": seed,
             }
 
             fold_scores: list[float] = []
@@ -171,6 +186,10 @@ class OptunaLGBMTuner(HyperparameterTuner):
                 "verbose": -1,
                 "objective": "binary",
                 "scale_pos_weight": scale_pos_weight,
+                "random_state": seed,
+                "feature_fraction_seed": seed,
+                "bagging_seed": seed,
+                "data_random_seed": seed,
             }
         )
         return tuned, float(study.best_value)
@@ -186,6 +205,11 @@ class OptunaLGBMTuner(HyperparameterTuner):
         if X_reg_all is None or y_reg_all is None or groups_reg_all is None:
             print("[WARNING] Not enough non-zero data for regression tuning.")
             return self.default_regressor_params.copy(), float("nan")
+
+        stable_order = np.argsort(groups_reg_all, kind="mergesort")
+        X_reg_all = X_reg_all[stable_order]
+        y_reg_all = y_reg_all[stable_order]
+        groups_reg_all = groups_reg_all[stable_order]
 
         n_unique_groups = len(np.unique(groups_reg_all))
         n_splits = min(5, n_unique_groups)
@@ -216,6 +240,10 @@ class OptunaLGBMTuner(HyperparameterTuner):
                 "n_jobs": 1,
                 "verbose": -1,
                 "objective": "regression",
+                "random_state": seed,
+                "feature_fraction_seed": seed,
+                "bagging_seed": seed,
+                "data_random_seed": seed,
             }
 
             fold_scores: list[float] = []
@@ -260,5 +288,15 @@ class OptunaLGBMTuner(HyperparameterTuner):
         study.optimize(objective, n_trials=n_trials)
 
         tuned = study.best_params
-        tuned.update({"n_jobs": 1, "verbose": -1, "objective": "regression"})
+        tuned.update(
+            {
+                "n_jobs": 1,
+                "verbose": -1,
+                "objective": "regression",
+                "random_state": seed,
+                "feature_fraction_seed": seed,
+                "bagging_seed": seed,
+                "data_random_seed": seed,
+            }
+        )
         return tuned, float(study.best_value)

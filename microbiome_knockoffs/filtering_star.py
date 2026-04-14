@@ -14,6 +14,7 @@ def cluster_features_star_optimized(
     X: sparse.csr_matrix | np.ndarray,
     correlation_threshold: float = 0.95,
     batch_size: int = 5000,
+    n_jobs: int = -1,
 ) -> tuple[np.ndarray, dict[int, np.ndarray]]:
     """Perform variance-priority star clustering over features.
 
@@ -46,7 +47,7 @@ def cluster_features_star_optimized(
     gc.collect()
 
     radius = np.sqrt(2 * (1 - correlation_threshold))
-    nn_model = NearestNeighbors(radius=radius, metric="euclidean", n_jobs=-1, algorithm="auto")
+    nn_model = NearestNeighbors(radius=radius, metric="euclidean", n_jobs=n_jobs, algorithm="auto")
     nn_model.fit(X_norm)
 
     sparse_graphs = []
@@ -96,7 +97,8 @@ def build_named_clusters(
     """Convert integer-index clusters into feature-name mapping."""
 
     named_clusters: dict[str, list[str]] = {}
-    for leader_idx, member_indices in clusters.items():
+    for leader_idx in sorted(clusters.keys()):
+        member_indices = clusters[leader_idx]
         leader_name = str(feature_names[leader_idx])
         member_names = [str(feature_names[idx]) for idx in member_indices]
         named_clusters[leader_name] = member_names
@@ -108,6 +110,7 @@ def run_feature_filtering(
     feature_names: np.ndarray,
     correlation_threshold: float = 0.95,
     batch_size: int = 64000,
+    n_jobs: int = -1,
 ) -> FilteringArtifacts:
     """Run feature filtering and return in-memory filtering artifacts.
 
@@ -123,6 +126,7 @@ def run_feature_filtering(
         X_sparse,
         correlation_threshold=correlation_threshold,
         batch_size=batch_size,
+        n_jobs=n_jobs,
     )
 
     X_filtered = X_sparse[:, leaders].copy().tocsr()

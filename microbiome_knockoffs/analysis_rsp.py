@@ -107,6 +107,7 @@ def calculate_shuffled_rsp_statistics(
     RP: int,
     target_fdr: float = 0.1,
     num_shuffles: int = 20,
+    rng: np.random.Generator | None = None,
 ) -> dict:
     """Estimate shuffled positives and build the RSP curve.
 
@@ -116,12 +117,12 @@ def calculate_shuffled_rsp_statistics(
 
     X_scaled = StandardScaler().fit_transform(X)
     X_tilde_scaled = StandardScaler().fit_transform(X_tilde)
+    rng = rng or np.random.default_rng(0)
 
     sp_counts: list[int] = []
-    y_perm = y.copy()
 
     for _ in range(num_shuffles):
-        np.random.shuffle(y_perm)
+        y_perm = rng.permutation(y)
         W_shuf = compute_knockoffs_statistic(X_scaled, X_tilde_scaled, y_perm)
         threshold = calculate_threshold(W_shuf, fdr=target_fdr, offset=1)
         sp_counts.append(int(len(select_features(W_shuf, threshold))))
@@ -150,6 +151,7 @@ def calculate_and_plot_rsp(
     target_fdr: float = 0.05,
     num_shuffles: int = 10,
     save_path: str | None = None,
+    rng: np.random.Generator | None = None,
 ) -> RSPResult:
     """Compute real and shuffled knockoff statistics and save RSP plot.
 
@@ -169,6 +171,7 @@ def calculate_and_plot_rsp(
         RP=real_stats["RP"],
         target_fdr=target_fdr,
         num_shuffles=num_shuffles,
+        rng=rng,
     )
 
     plt.figure(figsize=(9, 6))

@@ -20,6 +20,7 @@ def test_cli_help_commands_exit_zero():
         root / "scripts" / "run_knockoffs_pipeline.py",
         root / "scripts" / "preprocess_gene_abundance.py",
         root / "scripts" / "compare_knockoffs_classifiers.py",
+        root / "scripts" / "lgbm_feature_learning_sandbox.py",
         root / "scripts" / "generate_visualizations.py",
         root / "scripts" / "test_legacy_flow_compat.py",
     ]
