@@ -29,32 +29,32 @@ def calculate_threshold(W: np.ndarray, fdr: float = 0.1, offset: int = 1) -> flo
     return float("inf")
 
 
-def select_features(W: np.ndarray, threshold: float) -> np.ndarray:
-    """Return selected feature indices sorted by descending W score."""
+def build_feature_index_map(
+    W: np.ndarray,
+    is_significant: np.ndarray,
+) -> dict[int, tuple[float, bool]]:
+    """Build sorted feature map: feature_index -> (W_real, is_significant).
 
-    if threshold == float("inf"):
-        return np.array([], dtype=np.int32)
+    The mapping iteration order is deterministic and sorted by:
+    1) descending W_real, 2) ascending feature index for ties.
+    """
 
-    indices = np.where(W >= threshold)[0]
-    # Stable ordering: descending W, then ascending feature index for ties.
-    order = np.lexsort((indices, -W[indices]))
-    sorted_indices = indices[order]
-    return sorted_indices.astype(np.int32)
+    if W.ndim != 1:
+        raise ValueError("W must be a 1D array")
+    if is_significant.ndim != 1:
+        raise ValueError("is_significant must be a 1D array")
+    if W.shape[0] != is_significant.shape[0]:
+        raise ValueError("W and is_significant must have the same length")
 
+    n_features = int(W.shape[0])
+    all_indices = np.arange(n_features, dtype=np.int32)
+    order = np.lexsort((all_indices, -W))
+    ordered_indices = all_indices[order]
 
-def _validate_selected_indices(W: np.ndarray, selected_indices: np.ndarray) -> None:
-    """Validate index bounds and descending W order for selected features."""
-
-    if selected_indices.size == 0:
-        return
-
-    n_features = W.shape[0]
-    if int(selected_indices.min()) < 0 or int(selected_indices.max()) >= n_features:
-        raise ValueError("selected_indices contains out-of-range feature indices")
-
-    W_selected = W[selected_indices]
-    if np.any(W_selected[:-1] < W_selected[1:]):
-        raise ValueError("selected_indices must be ordered by descending W")
+    return {
+        int(idx): (float(W[idx]), bool(is_significant[idx]))
+        for idx in ordered_indices
+    }
 
 
 def compute_knockoffs_statistic(
@@ -81,7 +81,7 @@ def calculate_real_rsp_statistics(
     """Compute real-data knockoff selection statistics.
 
     Output dict keys:
-    - W_real, selected_indices, RP, threshold
+    - RP, threshold, feature_index_map
     """
 
     X_scaled = StandardScaler().fit_transform(X)
@@ -89,14 +89,13 @@ def calculate_real_rsp_statistics(
 
     W_real = compute_knockoffs_statistic(X_scaled, X_tilde_scaled, y)
     threshold = calculate_threshold(W_real, fdr=target_fdr, offset=1)
-    selected_indices = select_features(W_real, threshold)
-    _validate_selected_indices(W_real, selected_indices)
+    is_significant = W_real >= threshold
+    feature_index_map = build_feature_index_map(W_real, is_significant)
 
     return {
-        "W_real": W_real,
-        "selected_indices": selected_indices,
-        "RP": int(len(selected_indices)),
+        "RP": int(np.sum(is_significant)),
         "threshold": float(threshold),
+        "feature_index_map": feature_index_map,
     }
 
 
@@ -125,7 +124,7 @@ def calculate_shuffled_rsp_statistics(
         y_perm = rng.permutation(y)
         W_shuf = compute_knockoffs_statistic(X_scaled, X_tilde_scaled, y_perm)
         threshold = calculate_threshold(W_shuf, fdr=target_fdr, offset=1)
-        sp_counts.append(int(len(select_features(W_shuf, threshold))))
+        sp_counts.append(int(np.sum(W_shuf >= threshold)))
 
     SP = float(np.mean(sp_counts))
 
@@ -197,8 +196,7 @@ def calculate_and_plot_rsp(
     plt.close()
 
     return RSPResult(
-        W_real=real_stats["W_real"],
-        selected_indices=real_stats["selected_indices"],
+        feature_index_map=real_stats["feature_index_map"],
         rsp=shuffled_stats["rsp"],
         beta_values=shuffled_stats["beta_values"],
         RP=real_stats["RP"],

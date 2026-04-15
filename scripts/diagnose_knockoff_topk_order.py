@@ -82,15 +82,36 @@ def main() -> None:
     y = np.load(y_path)
     rsp_results = np.load(rsp_path, allow_pickle=True).item()
 
-    W_real = np.asarray(rsp_results["W_real"], dtype=float)
-    saved_selected = np.asarray(rsp_results.get("selected_indices", []), dtype=int)
-    if saved_selected.size == 0:
-        raise ValueError("rsp_results.npy has no selected_indices")
+    feature_index_map = rsp_results.get("feature_index_map")
+    if not isinstance(feature_index_map, dict) or len(feature_index_map) == 0:
+        raise ValueError("rsp_results.npy missing non-empty feature_index_map")
 
-    expected_desc = saved_selected[np.argsort(W_real[saved_selected])[::-1]]
-    saved_desc = bool(np.array_equal(saved_selected, expected_desc))
+    ordered_entries = [
+        (int(feature_index), float(values[0]), bool(values[1]))
+        for feature_index, values in feature_index_map.items()
+    ]
+    expected_desc = np.asarray(
+        [feature_index for feature_index, _, is_significant in ordered_entries if is_significant],
+        dtype=np.int32,
+    )
 
-    comparison_selected = _ordered_knockoff_selected_indices(rsp_results)
+    saved_desc = True
+    for idx in range(1, len(ordered_entries)):
+        prev_feature, prev_w, _ = ordered_entries[idx - 1]
+        curr_feature, curr_w, _ = ordered_entries[idx]
+        if prev_w < curr_w:
+            saved_desc = False
+            break
+        if prev_w == curr_w and prev_feature > curr_feature:
+            saved_desc = False
+            break
+
+    validation_error: str | None = None
+    try:
+        comparison_selected = _ordered_knockoff_selected_indices(rsp_results)
+    except ValueError as exc:
+        validation_error = str(exc)
+        comparison_selected = expected_desc
     comparison_desc = bool(np.array_equal(comparison_selected, expected_desc))
 
     if X_filtered.shape[0] != y.shape[0]:
@@ -181,6 +202,8 @@ def main() -> None:
 
     print(f"saved_selected_descending={saved_desc}")
     print(f"comparison_selected_descending={comparison_desc}")
+    if validation_error is not None:
+        print(f"comparison_validation_error={validation_error}")
     print(f"k_values={k_values}")
     print(f"descending_final_auc={desc_scores[-1]:.6f}")
     print(f"ascending_final_auc={asc_scores[-1]:.6f}")

@@ -41,10 +41,19 @@ def _load_rsp(path: Path) -> dict:
     raise TypeError("Expected a dict-like RSP payload")
 
 
+def _normalize_feature_index_map(payload: dict) -> list[tuple[int, tuple[float, bool]]]:
+    if "feature_index_map" not in payload:
+        raise KeyError("rsp_results payload missing feature_index_map")
+    feature_map = payload["feature_index_map"]
+    return [
+        (int(feature_index), (float(values[0]), bool(values[1])))
+        for feature_index, values in feature_map.items()
+    ]
+
+
 def _compare_rsp_dicts(left: dict, right: dict) -> bool:
     return (
-        np.array_equal(np.asarray(left["W_real"]), np.asarray(right["W_real"]))
-        and np.array_equal(np.asarray(left["selected_indices"]), np.asarray(right["selected_indices"]))
+        _normalize_feature_index_map(left) == _normalize_feature_index_map(right)
         and np.array_equal(np.asarray(left["rsp"]), np.asarray(right["rsp"]))
         and np.array_equal(np.asarray(left["beta_values"]), np.asarray(right["beta_values"]))
         and int(left["RP"]) == int(right["RP"])

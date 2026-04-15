@@ -191,29 +191,47 @@ def _to_csr_float32(matrix: sparse.spmatrix) -> sparse.csr_matrix:
 
 
 def _ordered_knockoff_selected_indices(rsp_results: dict[str, Any]) -> np.ndarray:
-    """Return knockoff-selected indices ordered by descending W_real.
+    """Extract significant feature indices from canonical feature_index_map.
 
-    The saved RSP artifact stores the selected indices and the underlying W values.
-    For ranked classifier comparisons, we need the feature indices in descending
-    significance order so that top-K slices are meaningful and stable.
+    The map must already be sorted by descending W_real with ascending feature
+    index as the tie-break. This function validates ordering and returns the
+    significant indices in that saved order.
     """
 
-    selected_feature_indices = np.asarray(rsp_results.get("selected_indices", []), dtype=int)
-    if selected_feature_indices.size == 0:
-        return selected_feature_indices
+    feature_index_map = rsp_results.get("feature_index_map")
+    if not isinstance(feature_index_map, dict) or len(feature_index_map) == 0:
+        raise ValueError("rsp_results missing non-empty feature_index_map")
 
-    if "W_real" not in rsp_results:
-        return selected_feature_indices[::-1]
+    selected_feature_indices: list[int] = []
+    prev_w: float | None = None
+    prev_idx: int | None = None
 
-    W_real = np.asarray(rsp_results["W_real"], dtype=float)
-    if W_real.ndim != 1:
-        raise ValueError("Expected W_real to be a 1D array in rsp_results")
-    if np.any(selected_feature_indices < 0) or np.any(selected_feature_indices >= W_real.shape[0]):
-        raise ValueError("selected_indices contain values outside the W_real range")
+    for raw_idx, raw_values in feature_index_map.items():
+        idx = int(raw_idx)
+        if idx < 0:
+            raise ValueError("feature_index_map contains negative feature index")
 
-    # Mirror analysis_rsp.select_features ordering: descending W, then ascending index for ties.
-    order = np.lexsort((selected_feature_indices, -W_real[selected_feature_indices]))
-    return selected_feature_indices[order].astype(np.int32)
+        if not isinstance(raw_values, (tuple, list)) or len(raw_values) != 2:
+            raise ValueError("feature_index_map values must be (W_real, is_significant) tuples")
+
+        w_val = float(raw_values[0])
+        is_significant = bool(raw_values[1])
+
+        if prev_w is not None:
+            if prev_w < w_val:
+                raise ValueError("feature_index_map must be sorted by descending W_real")
+            if prev_w == w_val and prev_idx is not None and prev_idx > idx:
+                raise ValueError(
+                    "feature_index_map tie-break must use ascending feature index"
+                )
+
+        prev_w = w_val
+        prev_idx = idx
+
+        if is_significant:
+            selected_feature_indices.append(idx)
+
+    return np.asarray(selected_feature_indices, dtype=np.int32)
 
 
 def load_classifier_inputs(config: ClassifierComparisonConfig) -> ComparisonData:

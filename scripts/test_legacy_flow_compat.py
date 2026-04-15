@@ -77,8 +77,14 @@ def load_run_summary(run_dir: Path) -> RunSummary:
 
     rp_val = rsp_result.get("RP")
     if rp_val is None:
-        selected = np.asarray(rsp_result.get("selected_indices", []), dtype=int)
-        rp_val = int(selected.size)
+        feature_index_map = rsp_result.get("feature_index_map", {})
+        rp_val = int(
+            sum(
+                1
+                for values in feature_index_map.values()
+                if isinstance(values, (tuple, list)) and len(values) == 2 and bool(values[1])
+            )
+        )
 
     return RunSummary(
         run_dir=str(run_dir),

@@ -135,8 +135,7 @@ class KnockoffOutputs:
 class RSPResult:
     """RSP analysis outputs."""
 
-    W_real: NDArray
-    selected_indices: NDArray
+    feature_index_map: dict[int, tuple[float, bool]]
     rsp: NDArray
     beta_values: NDArray
     RP: int

@@ -36,6 +36,16 @@ def _load_rsp_dict(path: Path) -> dict:
     raise TypeError("Expected saved RSP dict in numpy object file")
 
 
+def _normalize_feature_index_map(payload: dict) -> list[tuple[int, tuple[float, bool]]]:
+    if "feature_index_map" not in payload:
+        raise KeyError("rsp_results payload missing feature_index_map")
+    feature_map = payload["feature_index_map"]
+    return [
+        (int(feature_index), (float(values[0]), bool(values[1])))
+        for feature_index, values in feature_map.items()
+    ]
+
+
 def test_pipeline_is_reproducible_in_deterministic_mode(tmp_path: Path):
     study_name = "toy_study"
     _write_toy_study(tmp_path, study_name)
@@ -82,6 +92,9 @@ def test_pipeline_is_reproducible_in_deterministic_mode(tmp_path: Path):
 
     rsp_a = _load_rsp_dict(run_a.rsp_results_path)
     rsp_b = _load_rsp_dict(run_b.rsp_results_path)
+    assert "W_real" not in rsp_a and "W_real" not in rsp_b
+    assert "selected_indices" not in rsp_a and "selected_indices" not in rsp_b
+    assert _normalize_feature_index_map(rsp_a) == _normalize_feature_index_map(rsp_b)
     assert rsp_a["RP"] == rsp_b["RP"]
     np.testing.assert_allclose(np.asarray(rsp_a["rsp"]), np.asarray(rsp_b["rsp"]))
     np.testing.assert_allclose(np.asarray(rsp_a["beta_values"]), np.asarray(rsp_b["beta_values"]))
