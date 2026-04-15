@@ -22,3 +22,15 @@ def test_ordered_knockoff_selected_indices_falls_back_when_w_real_missing():
     ordered = _ordered_knockoff_selected_indices(rsp_results)
 
     assert ordered.tolist() == [1, 3, 0, 2]
+
+
+def test_ordered_knockoff_selected_indices_ties_break_by_feature_index():
+    rsp_results = {
+        "selected_indices": np.array([3, 2, 0, 1], dtype=int),
+        "W_real": np.array([1.0, 0.3, 1.0, 1.0], dtype=float),
+    }
+
+    ordered = _ordered_knockoff_selected_indices(rsp_results)
+
+    # Tied W_real among {0,2,3} should be ordered by ascending index.
+    assert ordered.tolist() == [0, 2, 3, 1]

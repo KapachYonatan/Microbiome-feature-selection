@@ -72,8 +72,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-folder", required=True, help="Run folder under study/runs")
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument("--test-size", type=float, default=0.2)
-    parser.add_argument("--k-grid-points", type=int, default=20)
-    parser.add_argument("--random-trials", type=int, default=20)
+    parser.add_argument("--k-grid-points", type=int, default=10)
+    parser.add_argument("--random-trials", type=int, default=10)
     parser.add_argument("--k-end", type=int, default=5000)
     parser.add_argument(
         "--k-start",

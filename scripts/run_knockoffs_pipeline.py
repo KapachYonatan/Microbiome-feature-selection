@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--calibration-features", type=int, default=None)
     parser.add_argument("--calibration-trials", type=int, default=None)
     parser.add_argument("--cluster-batch-size", type=int, default=None)
-    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=41)
 
     parser.add_argument(
         "--deterministic-mode",
@@ -43,8 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable deterministic execution profile",
     )
     parser.add_argument("--faiss-mode", choices=["hnsw", "flat"], default=None)
-    parser.add_argument("--faiss-threads", type=int, default=None)
-    parser.add_argument("--filter-n-jobs", type=int, default=None)
+    parser.add_argument("--faiss-threads", type=int, default=1)
+    parser.add_argument("--filter-n-jobs", type=int, default=1)
 
     parser.add_argument(
         "--use-optuna-tuning",

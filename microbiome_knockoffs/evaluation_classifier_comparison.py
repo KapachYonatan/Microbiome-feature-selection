@@ -41,8 +41,8 @@ class ClassifierComparisonConfig:
     run_folder: str
     random_state: int = 42
     test_size: float = 0.2
-    k_grid_points: int = 20
-    random_trials: int = 20
+    k_grid_points: int = 10
+    random_trials: int = 10
     k_end: int = 5000
     k_start: int | None = None
 
@@ -211,7 +211,8 @@ def _ordered_knockoff_selected_indices(rsp_results: dict[str, Any]) -> np.ndarra
     if np.any(selected_feature_indices < 0) or np.any(selected_feature_indices >= W_real.shape[0]):
         raise ValueError("selected_indices contain values outside the W_real range")
 
-    order = np.argsort(W_real[selected_feature_indices])[::-1]
+    # Mirror analysis_rsp.select_features ordering: descending W, then ascending index for ties.
+    order = np.lexsort((selected_feature_indices, -W_real[selected_feature_indices]))
     return selected_feature_indices[order].astype(np.int32)
 
 
