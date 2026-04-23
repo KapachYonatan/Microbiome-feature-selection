@@ -127,8 +127,7 @@ def main() -> None:
     y_train = y[idx_train]
     y_test = y[idx_test]
 
-    k_capacity = int(comparison_selected.shape[0])
-    k_values = build_k_grid(args.k_start, args.k_end, k_capacity, args.k_grid_points)
+    k_values = build_k_grid(args.k_start, args.k_end, args.k_grid_points)
 
     classifiers = classifier_registry()
     classifier_factory = classifiers[args.classifier]

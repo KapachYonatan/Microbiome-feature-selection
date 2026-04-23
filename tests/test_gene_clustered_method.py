@@ -2,6 +2,8 @@ import numpy as np
 from scipy import sparse
 
 from microbiome_knockoffs.evaluation_classifier_comparison import (
+    _align_raw_sample_rows,
+    build_k_grid,
     build_gene_feature_matrix,
     build_kmeans_clustered_feature_matrix,
     method_registry,
@@ -78,3 +80,40 @@ def test_method_registry_contains_gene_clustered_random():
 
     assert method.kind == "random"
     assert method.source == "gene_clustered"
+
+
+def test_align_raw_sample_rows_trims_extra_rows():
+    X_raw = sparse.csr_matrix(np.arange(12, dtype=np.float32).reshape(4, 3))
+
+    aligned = _align_raw_sample_rows(X_raw, y_sample_count=3)
+
+    assert aligned.shape == (3, 3)
+    assert np.allclose(aligned.toarray(), X_raw.toarray()[:3, :])
+
+
+def test_align_raw_sample_rows_raises_when_raw_has_fewer_rows():
+    X_raw = sparse.csr_matrix(np.arange(6, dtype=np.float32).reshape(2, 3))
+
+    try:
+        _align_raw_sample_rows(X_raw, y_sample_count=3)
+    except ValueError as exc:
+        assert "fewer rows than y_clean" in str(exc)
+    else:
+        raise AssertionError("Expected mismatch error when raw has fewer rows")
+
+
+def test_build_k_grid_uses_requested_end_without_capacity_clamp():
+    k_values = build_k_grid(k_start=182, k_end_requested=5000, k_grid_points=10)
+
+    assert k_values[0] == 182
+    assert k_values[-1] == 5000
+    assert len(k_values) >= 2
+
+
+def test_build_k_grid_raises_when_end_below_start():
+    try:
+        build_k_grid(k_start=300, k_end_requested=200, k_grid_points=10)
+    except ValueError as exc:
+        assert "Requested K_end" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError when K_end is smaller than K_start")

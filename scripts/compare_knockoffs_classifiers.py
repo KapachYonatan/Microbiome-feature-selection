@@ -36,6 +36,7 @@ warnings.filterwarnings(
 CLASSIFIER_NAME = "lgbm"
 METRIC_NAME = "roc_auc"
 BH_TEST_NAME = "mannwhitney"
+DEFAULT_OUTPUT_BASE_DIR = Path("/home/kapachy/Microbium/projects/cMD_downloads")
 
 ENABLED_METHODS = [
     "random_raw",
@@ -68,6 +69,11 @@ def _log(message: str, enabled: bool = True) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Compare knockoff-selected features against random and bacteria baselines.")
     parser.add_argument("--base-dir", required=True, help="Base directory containing study folders")
+    parser.add_argument(
+        "--output-base-dir",
+        default=str(DEFAULT_OUTPUT_BASE_DIR),
+        help="Base directory for saved classifier-comparison outputs (default: /home/kapachy/Microbium/projects/cMD_downloads)",
+    )
     parser.add_argument("--study", required=True, help="Study name")
     parser.add_argument("--run-folder", required=True, help="Run folder under study/runs")
     parser.add_argument("--random-state", type=int, default=42)
@@ -75,12 +81,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--k-grid-points", type=int, default=10)
     parser.add_argument("--random-trials", type=int, default=10)
     parser.add_argument("--k-end", type=int, default=5000)
-    parser.add_argument(
-        "--k-start",
-        type=int,
-        default=None,
-        help="Optional K-start override. By default starts at bacteria feature count.",
-    )
     parser.add_argument(
         "--save-csv",
         action="store_true",
@@ -119,10 +119,13 @@ def main() -> None:
         k_grid_points=args.k_grid_points,
         random_trials=args.random_trials,
         k_end=args.k_end,
-        k_start=args.k_start,
     )
 
-    _log(f"Resolved run directory: {config.run_dir}", verbose)
+    output_dir = Path(args.output_base_dir) / args.study
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    _log(f"Resolved input run directory: {config.run_dir}", verbose)
+    _log(f"Resolved output directory: {output_dir}", verbose)
     _log(
         "Running feature selection and classifier scoring across all enabled methods and K values...",
         verbose,
@@ -143,7 +146,8 @@ def main() -> None:
         verbose,
     )
 
-    plot_path = config.run_dir / f"classifier_comparison_{config.study_name}.png"
+    file_suffix = f"{config.study_name}_{config.run_folder}"
+    plot_path = output_dir / f"classifier_comparison_{file_suffix}.png"
     _log(f"Generating summary plot: {plot_path}", verbose)
     plot_classifier_comparison(
         results=results,
@@ -161,7 +165,7 @@ def main() -> None:
     print(f"Saved plot to: {plot_path}")
 
     if args.save_csv:
-        csv_path = config.run_dir / f"classifier_comparison_{config.study_name}.csv"
+        csv_path = output_dir / f"classifier_comparison_{file_suffix}.csv"
         _log(f"Saving CSV table: {csv_path}", verbose)
         results.to_csv(csv_path, index=False)
         print(f"Saved CSV to: {csv_path}")

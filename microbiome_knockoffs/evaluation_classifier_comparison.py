@@ -44,7 +44,6 @@ class ClassifierComparisonConfig:
     k_grid_points: int = 10
     random_trials: int = 10
     k_end: int = 5000
-    k_start: int | None = None
 
     @property
     def study_dir(self) -> Path:
@@ -107,7 +106,8 @@ def classifier_registry() -> dict[str, ClassifierFactory]:
     """
 
     return {
-        "lgbm": lambda random_state: lgb.LGBMClassifier(random_state=random_state, verbose=-1),
+        "lgbm": lambda random_state: lgb.LGBMClassifier(random_state=random_state, verbose=-1, n_estimators=300,
+                                                         learning_rate=0.05, min_child_samples=5),
         "logreg_l2": lambda random_state: LogisticRegression(
             random_state=random_state,
             solver="liblinear",
@@ -188,6 +188,36 @@ def _to_csr_float32(matrix: sparse.spmatrix) -> sparse.csr_matrix:
     """Convert sparse matrix to CSR float32 without unnecessary copies."""
 
     return matrix.tocsr().astype(np.float32, copy=False)
+
+
+def _align_raw_sample_rows(
+    X_raw: sparse.csr_matrix,
+    y_sample_count: int,
+) -> sparse.csr_matrix:
+    """Align raw matrix sample rows to y_clean count when raw has extra rows.
+
+    Some studies have one or more trailing raw rows that are not represented
+    in y_clean after preprocessing. We trim trailing rows to preserve the
+    sample alignment contract used by classifier comparison.
+    """
+
+    raw_rows = int(X_raw.shape[0])
+    if raw_rows == y_sample_count:
+        return X_raw
+
+    if raw_rows > y_sample_count:
+        extra_rows = raw_rows - y_sample_count
+        print(
+            "Warning: raw MTX has extra rows compared with y_clean "
+            f"(raw={raw_rows}, y={y_sample_count}). Trimming last {extra_rows} row(s)."
+        )
+        return X_raw[:y_sample_count, :].tocsr()
+
+    raise ValueError(
+        "Sample mismatch between raw MTX and y_clean. "
+        f"raw={raw_rows} y={y_sample_count}. "
+        "raw MTX has fewer rows than y_clean, cannot auto-align."
+    )
 
 
 def _ordered_knockoff_selected_indices(rsp_results: dict[str, Any]) -> np.ndarray:
@@ -285,12 +315,7 @@ def load_classifier_inputs(config: ClassifierComparisonConfig) -> ComparisonData
     selected_feature_indices = _ordered_knockoff_selected_indices(rsp_results)
 
     sample_count = y.shape[0]
-    if X_raw.shape[0] != sample_count:
-        raise ValueError(
-            "Sample mismatch between raw MTX and y_clean. "
-            f"raw={X_raw.shape[0]} y={sample_count}. "
-            "This comparison expects the raw matrix to align with y_clean samples."
-        )
+    X_raw = _align_raw_sample_rows(X_raw, sample_count)
 
     if X_clean.shape[0] != y.shape[0] or X_filtered.shape[0] != y.shape[0]:
         raise ValueError("Sample mismatch among X_clean/X_filtered and y_clean")
@@ -504,23 +529,21 @@ def rank_features_bh(
 def build_k_grid(
     k_start: int,
     k_end_requested: int,
-    k_capacity: int,
     k_grid_points: int,
 ) -> list[int]:
-    """Build monotonic K grid respecting data-driven bounds."""
+    """Build monotonic K grid from computed K_start to user-requested K_end."""
 
-    K_end_eff = min(k_end_requested, k_capacity)
-    if K_end_eff < k_start:
-        raise ValueError(f"Effective K_end={K_end_eff} is smaller than K_start={k_start}")
+    if k_end_requested < k_start:
+        raise ValueError(f"Requested K_end={k_end_requested} is smaller than K_start={k_start}")
     if k_grid_points < 2:
         raise ValueError("k_grid_points must be at least 2")
 
-    k_values = np.linspace(k_start, K_end_eff, num=k_grid_points, dtype=int)
+    k_values = np.linspace(k_start, k_end_requested, num=k_grid_points, dtype=int)
     k_values = np.unique(k_values).tolist()
     if k_values[0] != k_start:
         k_values.insert(0, k_start)
-    if k_values[-1] != K_end_eff:
-        k_values.append(K_end_eff)
+    if k_values[-1] != k_end_requested:
+        k_values.append(k_end_requested)
     return k_values
 
 
@@ -671,15 +694,13 @@ def run_classifier_comparison(
     needs_gene_clustered = any(method.key == "gene_clustered_random" for method in methods)
     bacteria_matrix: sparse.csr_matrix | None
     if needs_bacteria:
-        bacteria_matrix, bacteria_names = build_bacteria_feature_matrix(
+        bacteria_matrix, _ = build_bacteria_feature_matrix(
             data.X_bacteria_source,
             data.genes_bacteria_source,
         )
-        n_bacteria_features = int(bacteria_names.shape[0])
         print(f"Using '{data.bacteria_source_tag}' matrix for bacteria baseline features")
     else:
         bacteria_matrix = None
-        n_bacteria_features = 0
 
     ranking_map: dict[str, np.ndarray] = {}
     if any(method.key == "knockoff_topk" for method in methods):
@@ -739,17 +760,25 @@ def run_classifier_comparison(
             required_sources=required_sources,
         )
 
-    k_capacities = [
-        _capacity_for_method(method, ranking_map, matrix_map)
+    method_k_capacity: dict[str, int] = {
+        method.key: int(_capacity_for_method(method, ranking_map, matrix_map))
         for method in methods
         if method.kind != "constant"
-    ]
-    if not k_capacities:
+    }
+    if not method_k_capacity:
         raise ValueError("At least one K-dependent method must be enabled.")
+    if any(capacity < 1 for capacity in method_k_capacity.values()):
+        raise ValueError("All K-dependent methods must have at least one available feature")
 
-    k_capacity = int(min(k_capacities))
-    k_start = int(config.k_start) if config.k_start is not None else max(1, n_bacteria_features)
-    k_values = build_k_grid(k_start, config.k_end, k_capacity, config.k_grid_points)
+    # K_start should respect all enabled methods, including constant baselines
+    # such as bacteria features.
+    all_capacities = list(method_k_capacity.values())
+    for method in methods:
+        if method.kind == "constant" and method.source in matrix_map:
+            all_capacities.append(int(matrix_map[method.source].shape[1]))
+
+    k_start = int(min(all_capacities))
+    k_values = build_k_grid(k_start, int(config.k_end), config.k_grid_points)
 
     classifier_factory = classifiers[classifier_name]
     metric_fn = metrics[metric_name]
@@ -786,50 +815,61 @@ def run_classifier_comparison(
             continue
 
         source_matrix = matrix_map[method.source]
+        method_capacity = method_k_capacity[method.key]
+        if any(int(K) > method_capacity for K in k_values):
+            print(
+                f"Info: method '{method.key}' caps at {method_capacity} features; "
+                "scores for larger K reuse the capped model score."
+            )
+
+        score_cache: dict[int, float] = {}
 
         for K in k_values:
-            if method.kind == "ranked":
-                feature_indices = ranking_map[method.key][:K]
-                if feature_indices.shape[0] < K:
-                    raise ValueError(f"Method '{method.key}' cannot provide {K} features")
+            effective_k = min(int(K), method_capacity)
 
-                X_train_sub = source_matrix[idx_train][:, feature_indices]
-                X_test_sub = source_matrix[idx_test][:, feature_indices]
-                score = _fit_and_score(
-                    X_train_sub,
-                    X_test_sub,
-                    y_train,
-                    y_test,
-                    classifier_factory,
-                    metric_fn,
-                    config.random_state,
-                )
-                del X_train_sub, X_test_sub, feature_indices
-            elif method.kind == "random":
-                trial_scores: list[float] = []
-                n_features = source_matrix.shape[1]
-                for trial_idx in range(config.random_trials):
-                    trial_seed = int(rng.integers(1, 1_000_000_000))
-                    feature_indices = rng.choice(n_features, size=K, replace=False)
+            if effective_k not in score_cache:
+                if method.kind == "ranked":
+                    feature_indices = ranking_map[method.key][:effective_k]
 
                     X_train_sub = source_matrix[idx_train][:, feature_indices]
                     X_test_sub = source_matrix[idx_test][:, feature_indices]
-                    trial_scores.append(
-                        _fit_and_score(
-                            X_train_sub,
-                            X_test_sub,
-                            y_train,
-                            y_test,
-                            classifier_factory,
-                            metric_fn,
-                            trial_seed + trial_idx,
-                        )
+                    score_cache[effective_k] = _fit_and_score(
+                        X_train_sub,
+                        X_test_sub,
+                        y_train,
+                        y_test,
+                        classifier_factory,
+                        metric_fn,
+                        config.random_state,
                     )
                     del X_train_sub, X_test_sub, feature_indices
-                score = float(np.mean(trial_scores))
-                del trial_scores
-            else:
-                raise ValueError(f"Unsupported method kind '{method.kind}'")
+                elif method.kind == "random":
+                    trial_scores: list[float] = []
+                    n_features = source_matrix.shape[1]
+                    for trial_idx in range(config.random_trials):
+                        trial_seed = int(rng.integers(1, 1_000_000_000))
+                        feature_indices = rng.choice(n_features, size=effective_k, replace=False)
+
+                        X_train_sub = source_matrix[idx_train][:, feature_indices]
+                        X_test_sub = source_matrix[idx_test][:, feature_indices]
+                        trial_scores.append(
+                            _fit_and_score(
+                                X_train_sub,
+                                X_test_sub,
+                                y_train,
+                                y_test,
+                                classifier_factory,
+                                metric_fn,
+                                trial_seed + trial_idx,
+                            )
+                        )
+                        del X_train_sub, X_test_sub, feature_indices
+                    score_cache[effective_k] = float(np.mean(trial_scores))
+                    del trial_scores
+                else:
+                    raise ValueError(f"Unsupported method kind '{method.kind}'")
+
+            score = float(score_cache[effective_k])
 
             rows.append(
                 {
