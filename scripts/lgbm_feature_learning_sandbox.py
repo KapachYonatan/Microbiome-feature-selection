@@ -18,9 +18,6 @@ import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
-    f1_score,
-    mean_absolute_error,
-    mean_squared_error,
     precision_score,
     recall_score,
     roc_auc_score,
@@ -36,10 +33,6 @@ from microbiome_knockoffs.knockoffs import FaissFlatIPIndex, FaissHNSWIndex
 
 
 DEFAULT_PARAM_SETS = [
-    # ---------------------------------------------------------
-    # 1. THE CONSERVATIVE BASELINE
-    # ---------------------------------------------------------
-    # Shallow trees to prevent overfitting on your small feature space (K=40).
     {
         "id": "baseline_shallow",
         "classifier": {
@@ -50,107 +43,38 @@ DEFAULT_PARAM_SETS = [
             "verbose": -1,
             "n_jobs": 1,
         },
-        "regressor": {
-            "objective": "regression",
-            "max_depth": 3,
-            "num_leaves": 7,
-            "learning_rate": 0.1,
-            "verbose": -1,
-            "n_jobs": 1,
-        },
     },
-
-    # ---------------------------------------------------------
-    # 2. THE SPARSITY/IMBALANCE SPECIALIST
-    # ---------------------------------------------------------
-    # Tells the classifier to aggressively weight the rare non-zero instances.
-    # Lowers min_child_samples for the regressor because it only trains on 
-    # the non-zero subset, which might be tiny.
     {
         "id": "sparse_imbalanced",
         "classifier": {
             "objective": "binary",
             "max_depth": 5,
             "num_leaves": 15,
-            "is_unbalance": True, # Crucial for 0-inflated targets
-            "learning_rate": 0.05,
-            "verbose": -1,
-            "n_jobs": 1,
-        },
-        "regressor": {
-            "objective": "regression",
-            "max_depth": 4,
-            "num_leaves": 10,
-            "min_child_samples": 5, # Allows leaf splits even with very few non-zero patients
+            "is_unbalance": True,
             "learning_rate": 0.05,
             "verbose": -1,
             "n_jobs": 1,
         },
     },
-
     {
         "id": "sparse_imbalanced_plus",
         "classifier": {
-        "objective": "binary",
-        "metric": "auc",               # AUC is much better than accuracy for zero-inflated data
-        
-        # --- Tree Structure ---
-        "max_depth": 5,                # Deep enough to find interactions, shallow enough to prevent memorization
-        "num_leaves": 15,              # Kept strictly under 2^5 to force generalization
-        
-        # --- Imbalance Control ---
-        # A weight of 5.0 tells the model: "A false negative (missing a rare bug) 
-        # is 5 times worse than a false positive." This is usually much safer 
-        # than is_unbalance=True, which can overcorrect.
-        "scale_pos_weight": 5.0,       
-        
-        # --- Stochasticity (Correlation Breakers) ---
-        "colsample_bytree": 0.7,       # Blinds the tree to 30% of the 40 neighbors. Forces it to find alternative pathways.
-        "subsample": 0.8,              # Trains each tree on only 80% of the patients
-        "subsample_freq": 1,           # Applies the subsampling every 1 tree
-        
-        # --- Regularization ---
-        "reg_alpha": 0.5,              # L1: Forces weights of useless neighbors exactly to 0
-        "reg_lambda": 1.0,             # L2: Prevents coefficients of highly collinear bugs from exploding
-        
-        # --- Learning Speed ---
-        "learning_rate": 0.05,
-        "n_estimators": 200,           # Good baseline if you aren't using early stopping
-        "verbose": -1,
-        "n_jobs": 1
+            "objective": "binary",
+            "metric": "auc",
+            "max_depth": 5,
+            "num_leaves": 15,
+            "scale_pos_weight": 5.0,
+            "colsample_bytree": 0.7,
+            "subsample": 0.8,
+            "subsample_freq": 1,
+            "reg_alpha": 0.5,
+            "reg_lambda": 1.0,
+            "learning_rate": 0.05,
+            "n_estimators": 200,
+            "verbose": -1,
+            "n_jobs": 1,
+        },
     },
-    
-    "regressor": {
-        "objective": "regression_l1",  # L1 (MAE) loss provides total immunity to massive microbiome abundance spikes
-        "metric": "mae",
-        
-        # --- Tree Structure ---
-        # The regressor only sees the rare patients where the bug is present.
-        # Because this training subset is so small, the trees must be highly restricted.
-        "max_depth": 4,                
-        "num_leaves": 10,              
-        
-        # --- Extreme Sparsity Survival ---
-        "min_child_samples": 5,        # CRITICAL: Allows the model to create a leaf even if only 5 patients share a pattern
-        
-        # --- Stochasticity ---
-        "colsample_bytree": 0.7,       
-        "subsample": 0.8,              
-        "subsample_freq": 1,
-        
-        # --- Regularization ---
-        # Regularization is heavily increased here compared to the classifier because 
-        # overfitting is much easier on the tiny non-zero training set.
-        "reg_alpha": 2.0,              
-        "reg_lambda": 5.0,             
-        
-        # --- Learning Speed ---
-        "learning_rate": 0.05,
-        "n_estimators": 200,
-        "verbose": -1,
-        "n_jobs": 1
-    }
-    }
 ]
 
 
@@ -182,7 +106,6 @@ class SandboxConfig:
 class ParameterSet:
     config_id: str
     classifier_params: dict
-    regressor_params: dict
 
 
 def _log(msg: str, quiet: bool) -> None:
@@ -196,11 +119,6 @@ def _as_1d_str(arr: np.ndarray) -> np.ndarray:
     if np.ndim(arr) == 0:
         return np.array([str(arr)])
     return arr.astype(str)
-
-
-def _is_binary_feature(values: np.ndarray) -> bool:
-    unique_vals = np.unique(values)
-    return bool(np.all(np.isin(unique_vals, [0.0, 1.0])) and unique_vals.size <= 2)
 
 
 @contextmanager
@@ -270,31 +188,6 @@ def _merge_classifier_params(user_params: dict, seed: int) -> dict:
         "data_random_seed": seed,
     }
     params.update(user_params)
-    params.setdefault("random_state", seed)
-    params.setdefault("feature_fraction_seed", seed)
-    params.setdefault("bagging_seed", seed)
-    params.setdefault("data_random_seed", seed)
-    return params
-
-
-def _merge_regressor_params(user_params: dict, seed: int) -> dict:
-    params = {
-        "n_estimators": 50,
-        "max_depth": 2,
-        "learning_rate": 0.1,
-        "objective": "regression",
-        "verbose": -1,
-        "n_jobs": 1,
-        "random_state": seed,
-        "feature_fraction_seed": seed,
-        "bagging_seed": seed,
-        "data_random_seed": seed,
-    }
-    params.update(user_params)
-    params.setdefault("random_state", seed)
-    params.setdefault("feature_fraction_seed", seed)
-    params.setdefault("bagging_seed", seed)
-    params.setdefault("data_random_seed", seed)
     return params
 
 
@@ -312,17 +205,13 @@ def _parse_param_sets(raw_json: str, seed: int) -> list[ParameterSet]:
 
         config_id = str(item.get("id", f"config_{idx}"))
         clf = item.get("classifier", item.get("classifier_params", {}))
-        reg = item.get("regressor", item.get("regressor_params", {}))
         if not isinstance(clf, dict):
             raise TypeError(f"classifier params for {config_id} must be an object")
-        if not isinstance(reg, dict):
-            raise TypeError(f"regressor params for {config_id} must be an object")
 
         param_sets.append(
             ParameterSet(
                 config_id=config_id,
                 classifier_params=_merge_classifier_params(clf, seed=seed),
-                regressor_params=_merge_regressor_params(reg, seed=seed),
             )
         )
 
@@ -354,7 +243,6 @@ def _evaluate_support(
             "support_accuracy": np.nan,
             "support_recall": np.nan,
             "support_precision": np.nan,
-            "support_f1": np.nan,
             "support_roc_auc": np.nan,
             "support_pr_auc": np.nan,
         }
@@ -366,7 +254,6 @@ def _evaluate_support(
             "support_accuracy": np.nan,
             "support_recall": np.nan,
             "support_precision": np.nan,
-            "support_f1": np.nan,
             "support_roc_auc": np.nan,
             "support_pr_auc": np.nan,
         }
@@ -390,7 +277,6 @@ def _evaluate_support(
             "support_accuracy": np.nan,
             "support_recall": np.nan,
             "support_precision": np.nan,
-            "support_f1": np.nan,
             "support_roc_auc": np.nan,
             "support_pr_auc": np.nan,
         }
@@ -408,85 +294,44 @@ def _evaluate_support(
         "support_accuracy": float(accuracy_score(y_test, y_pred)),
         "support_recall": float(recall_score(y_test, y_pred, zero_division=0)),
         "support_precision": float(precision_score(y_test, y_pred, zero_division=0)),
-        "support_f1": float(f1_score(y_test, y_pred, zero_division=0)),
         "support_roc_auc": roc_auc,
         "support_pr_auc": pr_auc,
     }
 
 
-def _evaluate_values(
-    S_matrix: np.ndarray,
-    target_values: np.ndarray,
-    reg_params: dict,
-    test_size: float,
-    seed: int,
-) -> dict[str, float | str]:
-    nonzero_mask = target_values > 0
-    n_nonzero = int(np.sum(nonzero_mask))
-    if n_nonzero < 10:
-        return {
-            "value_status": "too_few_nonzero",
-            "value_mae": np.nan,
-            "value_rmse": np.nan,
-        }
-
-    X_reg = S_matrix[nonzero_mask]
-    y_reg = target_values[nonzero_mask]
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_reg,
-        y_reg,
-        test_size=test_size,
-        random_state=seed,
-    )
-
-    model = lgb.LGBMRegressor(**reg_params)
-    try:
-        with _suppress_lgbm_feature_name_warnings():
-            model.fit(X_train, np.log1p(y_train))
-            y_pred_log = model.predict(X_test)
-    except Exception as exc:
-        return {
-            "value_status": f"fit_failed:{type(exc).__name__}",
-            "value_mae": np.nan,
-            "value_rmse": np.nan,
-        }
-
-    y_pred = np.expm1(y_pred_log)
-    y_pred = np.clip(y_pred, a_min=0.0, a_max=None)
-
-    mae = float(mean_absolute_error(y_test, y_pred))
-    rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
-    return {
-        "value_status": "ok",
-        "value_mae": mae,
-        "value_rmse": rmse,
+def _summarize_results(df: pd.DataFrame) -> pd.DataFrame:
+    cols = [
+        "support_accuracy",
+        "support_recall",
+        "support_precision",
+        "support_roc_auc",
+        "support_pr_auc",
+    ]
+    rename_map = {
+        "support_accuracy_mean": "Acc (avg)",
+        "support_accuracy_std": "Acc (std)",
+        "support_recall_mean": "Rec (avg)",
+        "support_recall_std": "Rec (std)",
+        "support_precision_mean": "Prec (avg)",
+        "support_precision_std": "Prec (std)",
+        "support_roc_auc_mean": "Roc_auc (avg)",
+        "support_roc_auc_std": "Roc_auc (std)",
+        "support_pr_auc_mean": "Pr_auc (avg)",
+        "support_pr_auc_std": "Pr_auc (std)",
     }
 
-
-def _summarize_results(df: pd.DataFrame) -> pd.DataFrame:
-    numeric_cols = [
-        col
-        for col in df.columns
-        if col.startswith("support_") or col.startswith("value_")
-    ]
-    numeric_cols = [col for col in numeric_cols if col not in {"support_status", "value_status"}]
-
     grouped = df.groupby("config_id")
-    summary = grouped[numeric_cols].agg(["mean", "std"]).reset_index()
+    summary = grouped[cols].agg(["mean", "std"]).reset_index()
     summary.columns = [
         "config_id" if col == ("config_id", "") else f"{col[0]}_{col[1]}"
         for col in summary.columns.to_flat_index()
     ]
+    summary = summary.rename(columns=rename_map)
 
-    rate_df = grouped.agg(
-        support_ok_rate=("support_status", lambda s: float(np.mean(s == "ok"))),
-        value_ok_rate=("value_status", lambda s: float(np.mean(s == "ok"))),
-        binary_target_rate=("target_is_binary", lambda s: float(np.mean(s))),
-        n_feature_rows=("target_feature_idx", "size"),
-    ).reset_index()
+    numeric_cols = [c for c in summary.columns if c != "config_id"]
+    summary[numeric_cols] = summary[numeric_cols].round(3)
 
-    return summary.merge(rate_df, on="config_id", how="left")
+    return summary
 
 
 def run_sandbox(config: SandboxConfig) -> tuple[pd.DataFrame, pd.DataFrame, Path, Path]:
@@ -530,33 +375,26 @@ def run_sandbox(config: SandboxConfig) -> tuple[pd.DataFrame, pd.DataFrame, Path
                         "config_id": param_set.config_id,
                         "target_feature_idx": int(feature_idx),
                         "target_feature_name": str(genes_filtered[int(feature_idx)]),
-                        "target_is_binary": _is_binary_feature(raw_vectors[int(feature_idx)]),
                         "n_neighbors": 0,
                         "n_nonzero": int(np.sum(raw_vectors[int(feature_idx)] > 0)),
                         "support_status": "no_neighbors",
-                        "value_status": "skipped_no_neighbors",
                         "support_accuracy": np.nan,
                         "support_recall": np.nan,
                         "support_precision": np.nan,
-                        "support_f1": np.nan,
                         "support_roc_auc": np.nan,
                         "support_pr_auc": np.nan,
-                        "value_mae": np.nan,
-                        "value_rmse": np.nan,
                     }
                 )
             continue
 
         S_matrix = raw_vectors[neighbors].T
         target_values = raw_vectors[int(feature_idx)]
-        target_is_binary = _is_binary_feature(target_values)
 
         for param_set in param_sets:
             base = {
                 "config_id": param_set.config_id,
                 "target_feature_idx": int(feature_idx),
                 "target_feature_name": str(genes_filtered[int(feature_idx)]),
-                "target_is_binary": target_is_binary,
                 "n_neighbors": len(neighbors),
                 "n_nonzero": int(np.sum(target_values > 0)),
             }
@@ -569,22 +407,7 @@ def run_sandbox(config: SandboxConfig) -> tuple[pd.DataFrame, pd.DataFrame, Path
                 seed=config.random_seed,
             )
 
-            if target_is_binary:
-                value = {
-                    "value_status": "skipped_binary_target",
-                    "value_mae": np.nan,
-                    "value_rmse": np.nan,
-                }
-            else:
-                value = _evaluate_values(
-                    S_matrix=S_matrix,
-                    target_values=target_values,
-                    reg_params=param_set.regressor_params,
-                    test_size=config.test_size,
-                    seed=config.random_seed,
-                )
-
-            rows.append({**base, **support, **value})
+            rows.append({**base, **support})
 
     detailed_df = pd.DataFrame(rows)
     summary_df = _summarize_results(detailed_df)
@@ -597,7 +420,7 @@ def run_sandbox(config: SandboxConfig) -> tuple[pd.DataFrame, pd.DataFrame, Path
     detailed_df.to_csv(detailed_csv, index=False)
     summary_df.to_csv(summary_csv, index=False)
 
-    sort_col = "support_roc_auc_mean"
+    sort_col = "Roc_auc (avg)"
     if sort_col in summary_df.columns:
         display_df = summary_df.sort_values(sort_col, ascending=False)
     else:
@@ -634,7 +457,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=json.dumps(DEFAULT_PARAM_SETS),
         help=(
             "JSON list of parameter-set objects. Each object supports keys: "
-            "id, classifier, regressor."
+            "id, classifier."
         ),
     )
     parser.add_argument("--quiet", action="store_true")
