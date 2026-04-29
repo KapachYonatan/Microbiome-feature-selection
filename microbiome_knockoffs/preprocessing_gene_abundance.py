@@ -8,7 +8,7 @@ import pandas as pd
 from scipy import io, sparse
 
 try:
-    from ete3 import NCBITaxa
+    from ete4 import NCBITaxa
 except ImportError:  # pragma: no cover
     NCBITaxa = None
 
