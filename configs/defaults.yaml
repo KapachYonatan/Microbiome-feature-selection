@@ -4,7 +4,7 @@ pipeline:
   sparsity_threshold: 0.85
   k_neighbors: 40
   target_fdr: 0.05
-  num_shuffles: 20
+  num_shuffles: 10
   correlation_threshold: 0.95
   calibration_features: 2000
   calibration_trials: 50
@@ -12,7 +12,7 @@ pipeline:
   seed: 42
 
 determinism:
-  deterministic_mode: false
+  deterministic_mode: True
   faiss_mode: hnsw
   faiss_threads: 1
   filter_n_jobs: null
